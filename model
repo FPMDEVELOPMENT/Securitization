@@ -1,0 +1,72 @@
+# Import necessary libraries
+import streamlit as st
+import numpy as np
+import pandas as pd
+import altair as alt  # Alternative to matplotlib
+from snowflake.snowpark.context import get_active_session  # Corrected import
+
+# Use the existing Snowflake session
+session = get_active_session()
+
+def calculate_npv(ap, t, discount_rate):
+    years = np.arange(1, t+1)
+    cash_flows = np.full(t, ap / t)
+    npv = np.sum(cash_flows / (1 + discount_rate) ** years)
+    return npv
+
+def calculate_tranches(npv, advance_rate, credit_enhancement, tranche_allocation):
+    securitization_proceeds = npv * advance_rate - (credit_enhancement * npv)
+    tranches = {tranche: securitization_proceeds * alloc for tranche, alloc in tranche_allocation.items()}
+    return securitization_proceeds, tranches
+
+# Streamlit UI
+st.title("Securitization Model - Interactive Dashboard")
+
+# User Inputs
+ap = st.number_input("Total Asset Pool ($)", min_value=1_000_000, value=165_000_000, step=1_000_000)
+t = st.slider("PPA Term (Years)", min_value=5, max_value=30, value=20)
+discount_rate = st.slider("Discount Rate (%)", min_value=5.0, max_value=15.0, value=7.0, step=0.1) / 100
+advance_rate = st.slider("Advance Rate (%)", min_value=40.0, max_value=80.0, value=60.0, step=1.0) / 100
+credit_enhancement = st.slider("Credit Enhancement (%)", min_value=0.5, max_value=5.0, value=1.5, step=0.1) / 100
+
+tranche_allocation = {"Senior": 0.70, "Mezzanine": 0.20, "Equity": 0.10}
+
+# Calculation
+npv = calculate_npv(ap, t, discount_rate)
+securitization_proceeds, tranches = calculate_tranches(npv, advance_rate, credit_enhancement, tranche_allocation)
+
+# Display Results
+st.subheader("Net Present Value (NPV)")
+st.write(f"NPV of Asset Pool: **${npv:,.2f}**")
+
+st.subheader("Securitization Proceeds")
+st.write(f"Total Issuance: **${securitization_proceeds:,.2f}**")
+
+st.subheader("Tranche Breakdown")
+df_tranches = pd.DataFrame(tranches.items(), columns=["Tranche", "Amount ($)"])
+st.dataframe(df_tranches)
+
+# Graphical Representation
+st.subheader("Tranche Distribution - Bar Chart")
+fig, ax = plt.subplots()
+ax.bar(tranches.keys(), tranches.values(), color=['blue', 'orange', 'green'])
+ax.set_ylabel("Amount ($)")
+ax.set_title("Securitization Tranches")
+st.pyplot(fig)
+
+# Monte Carlo Simulation (Optional for Risk Analysis)
+st.subheader("Monte Carlo Simulation - Sensitivity Analysis")
+simulations = 1000
+discount_sim = np.random.uniform(0.05, 0.10, simulations)
+npv_simulated = [calculate_npv(ap, t, d) for d in discount_sim]
+
+fig, ax = plt.subplots()
+ax.hist(npv_simulated, bins=30, color='purple', alpha=0.7)
+ax.set_xlabel("NPV Values ($)")
+ax.set_ylabel("Frequency")
+ax.set_title("Monte Carlo Simulation of NPV")
+st.pyplot(fig)
+
+# Downloadable CSV
+csv = df_tranches.to_csv(index=False).encode('utf-8')
+st.download_button("Download Tranche Data", csv, "tranche_distribution.csv", "text/csv")
